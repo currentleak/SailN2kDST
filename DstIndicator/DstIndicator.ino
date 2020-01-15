@@ -8,6 +8,12 @@
 
 #define NUMBER_OF_DIGIT   3u
 
+#define SEGMENT_ON  LOW
+#define SEGMENT_OFF HIGH
+#define DISPLAY_BRIGHTNESS  500
+#define DIGIT_ON  HIGH
+#define DIGIT_OFF  LOW
+
 // Function prototypes
 void processCan();
 void serialPrintData(st_cmd_t *msg);
@@ -24,6 +30,8 @@ uint8_t Buffer[8] = {};
 
 Timer t;
 uint16_t Depth = 0;  // /10 m
+bool lossEcho = false;
+bool dot = false;
 
 // pin mapping 7seg
 int digit1 = 5; //PWM Display pin 2, second digit
@@ -36,6 +44,7 @@ int segD = 13; //Display pin 3
 int segE = 14; //Display pin 5
 int segF = 15; //Display pin 11
 int segG = 16; //Display pin 15
+int dp = 17; //Display pin 7
 
 void setup() 
 {    
@@ -43,6 +52,7 @@ void setup()
     pinMode(segA, OUTPUT);  pinMode(segB, OUTPUT);  pinMode(segC, OUTPUT);  pinMode(segD, OUTPUT);  
     pinMode(segE, OUTPUT);  pinMode(segF, OUTPUT);  pinMode(segG, OUTPUT);  
     pinMode(digit1, OUTPUT);  pinMode(digit2, OUTPUT);  pinMode(digit3, OUTPUT);
+    pinMode(dp, OUTPUT);
   
     // CAN
     canInit(250000u);            // Initialise CAN port 250kbps. must be before Serial.begin
@@ -59,23 +69,26 @@ void setup()
     int tickEvent = t.every(15, displayValue, 0);
   
     displayNumber(Depth); // test LCD segments, counter 0-9
+    delay(10);
     for(int i=0; i<10; i++)
     {
-      for(int j=0; j<25; j++)
+      if(dot == false) dot = true;
+      else dot = false;
+      for(int j=0; j<10; j++)
       {
         delay(10);
         displayNumber(i*111);
       }
     }
+    delay(10);
     displayNumber(Depth);
-    
 }
 
 void loop() 
 {
     t.update();
 
-    processCan();
+    processCan(); 
 }
 
 
@@ -112,19 +125,30 @@ void getNMEA2Kdata(st_cmd_t *msg)
   if ( (uint16_t)msg->id.ext == 0xb23)  // depth 
   {
     Serial.print("NMEA2k: depth 0xb23\r\n");    
-    uint32_t Du32 = (uint32_t)(((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) | ((uint32_t)Msg.pt_data[2] << 8) | Msg.pt_data[1]);
-    if (Du32 == 0xFFFFFFFF)
+    uint32_t Du32 = (uint32_t)( ((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) |
+                                ((uint32_t)Msg.pt_data[2] << 8) | (uint32_t)Msg.pt_data[1] );
+    if (Du32 == 0xFFFFFFFF) // DST800 no echo
     {
-        Depth = 0;
+        dot = false;
+        lossEcho = true;
+        Depth = 999;
     }
     else
     {
-        double Dd = (double)Du32 * 0.001;
+        double Dd = (double)Du32 * 0.01; // in dm, with a dot before the last digit display is in meter
+        Dd = round(Dd);
         Depth = (uint16_t)Dd;
-//        if(Depth > 999)
-//        {
-//            Depth = 999;
-//        }
+        if(Depth >= 1000) // DST800 is 100m=1000dm max
+        {
+          dot = false;
+          Depth = 888;
+        }
+        else
+        {
+          dot = true;
+        }
+        lossEcho = false;
+
     }
   }
   else if ( (uint16_t)msg->id.ext == 0x323) // speed
@@ -183,9 +207,6 @@ void serialPrintData(st_cmd_t *msg) {
 
 
 void displayNumber(int toDisplay) {
-#define DISPLAY_BRIGHTNESS  500
-#define DIGIT_ON  HIGH
-#define DIGIT_OFF  LOW
   long beginTime = millis();
 
   for (int digit = NUMBER_OF_DIGIT ; digit > 0 ; digit--) 
@@ -195,12 +216,18 @@ void displayNumber(int toDisplay) {
     {
       case 1:
         digitalWrite(digit1, DIGIT_ON);
+        digitalWrite(dp, SEGMENT_OFF);
         break;
       case 2:
         digitalWrite(digit2, DIGIT_ON);
+        if(dot == true) 
+          digitalWrite(dp, SEGMENT_ON);
+        else 
+          digitalWrite(dp, SEGMENT_OFF);
         break;
       case 3:
         digitalWrite(digit3, DIGIT_ON);
+        digitalWrite(dp, SEGMENT_OFF);
         break;
     }
     //Turn on the right segments for this digit
@@ -212,6 +239,7 @@ void displayNumber(int toDisplay) {
     //Turn off all digits
     digitalWrite(digit1, DIGIT_OFF);
     digitalWrite(digit2, DIGIT_OFF);
+    digitalWrite(dp, SEGMENT_OFF);
     digitalWrite(digit3, DIGIT_OFF);
   }
   while ( (millis() - beginTime) < 10) ; //Wait for 20ms to pass before we paint the display again
@@ -219,10 +247,8 @@ void displayNumber(int toDisplay) {
 
 //Given a number, turns on those segments
 //If number == 10, then turn off number
-void lightNumber(int numberToDisplay) {
-#define SEGMENT_ON  LOW
-#define SEGMENT_OFF HIGH
-
+void lightNumber(int numberToDisplay) 
+{
   switch (numberToDisplay) 
   {
     case 0:
