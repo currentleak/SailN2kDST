@@ -58,7 +58,17 @@ void setup()
   
     int tickEvent = t.every(15, displayValue, 0);
   
+    displayNumber(Depth); // test LCD segments, counter 0-9
+    for(int i=0; i<10; i++)
+    {
+      for(int j=0; j<25; j++)
+      {
+        delay(10);
+        displayNumber(i*111);
+      }
+    }
     displayNumber(Depth);
+    
 }
 
 void loop() 
@@ -101,7 +111,7 @@ void getNMEA2Kdata(st_cmd_t *msg)
 {
   if ( (uint16_t)msg->id.ext == 0xb23)  // depth 
   {
-    Serial.print("NMEA2k: depth\r\n");    
+    Serial.print("NMEA2k: depth 0xb23\r\n");    
     uint32_t Du32 = (uint32_t)(((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) | ((uint32_t)Msg.pt_data[2] << 8) | Msg.pt_data[1]);
     if (Du32 == 0xFFFFFFFF)
     {
@@ -111,27 +121,31 @@ void getNMEA2Kdata(st_cmd_t *msg)
     {
         double Dd = (double)Du32 * 0.001;
         Depth = (uint16_t)Dd;
-        if(Depth > 999)
-        {
-            Depth = 999;
-        }
+//        if(Depth > 999)
+//        {
+//            Depth = 999;
+//        }
     }
   }
   else if ( (uint16_t)msg->id.ext == 0x323) // speed
   {
-    Serial.print("NMEA2k: speed\r\n");    
+    Serial.print("NMEA2k: speed 0x323\r\n");    
   }
   else if ( (uint16_t)msg->id.ext == 0x723) // water temp
   {
-    Serial.print("NMEA2k: water temp\r\n");
+    Serial.print("NMEA2k: water temp 0x723\r\n");
   }
   else if ( (uint16_t)msg->id.ext == 0x1223 ) // heading 0x1223 = 4643
   {
-    Serial.print("NMEA2k: heading\r\n");
+    Serial.print("NMEA2k: heading 0x1223\r\n");
   }
   else 
-    Serial.print("NMEA2k: unmanaged PGN\r\n");
-  
+  {
+    char textBuffer[50] = {0};
+    sprintf(textBuffer, "NMEA2k: unmanaged PGN IDext=%d\r\n", msg->id.ext);
+    Serial.print(textBuffer);
+  }
+
   // ... others NMEA2K message
 }
 
