@@ -1,12 +1,12 @@
 #include <ASTCanLib.h>
 #include <Timer.h>
 
-#define MESSAGE_ID        0       // Message ID
-#define MESSAGE_PROTOCOL  1       // CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-#define MESSAGE_LENGTH    8       // Data length: 8 bytes
-#define MESSAGE_RTR       0       // rtr bit
+#define MESSAGE_ID        0u       // Message ID
+#define MESSAGE_PROTOCOL  1u       // CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+#define MESSAGE_LENGTH    8u       // Data length: 8 bytes
+#define MESSAGE_RTR       0u       // rtr bit
 
-#define NUMBER_OF_DIGIT   3
+#define NUMBER_OF_DIGIT   3u
 
 // Function prototypes
 void processCan();
@@ -15,7 +15,7 @@ void displayNumber(int toDisplay);
 void displayValue();
 void lightNumber(int numberToDisplay);
 
-int getNMEA2Kdata(st_cmd_t *msg);
+void getNMEA2Kdata(st_cmd_t *msg);
 
 // CAN message object
 st_cmd_t Msg;
@@ -23,7 +23,7 @@ st_cmd_t Msg;
 uint8_t Buffer[8] = {};
 
 Timer t;
-int Depth = 0;  // /10 m
+uint16_t Depth = 0;  // /10 m
 
 // pin mapping 7seg
 int digit1 = 5; //PWM Display pin 2, second digit
@@ -39,36 +39,35 @@ int segG = 16; //Display pin 15
 
 void setup() 
 {    
-  // 7seg LEDs
-  pinMode(segA, OUTPUT);  pinMode(segB, OUTPUT);  pinMode(segC, OUTPUT);  pinMode(segD, OUTPUT);  
-  pinMode(segE, OUTPUT);  pinMode(segF, OUTPUT);  pinMode(segG, OUTPUT);  
-  pinMode(digit1, OUTPUT);  pinMode(digit2, OUTPUT);  pinMode(digit3, OUTPUT);
-
-  // CAN
-  canInit(250000);            // Initialise CAN port 250kbps. must be before Serial.begin
-  Serial.begin(1000000);       // start serial port 1Mbps
-  Msg.pt_data = &Buffer[0];    // reference message data to buffer
+    // 7seg LEDs
+    pinMode(segA, OUTPUT);  pinMode(segB, OUTPUT);  pinMode(segC, OUTPUT);  pinMode(segD, OUTPUT);  
+    pinMode(segE, OUTPUT);  pinMode(segF, OUTPUT);  pinMode(segG, OUTPUT);  
+    pinMode(digit1, OUTPUT);  pinMode(digit2, OUTPUT);  pinMode(digit3, OUTPUT);
   
-  // Initialise CAN packet.
-  // All of these will be overwritten by a received packet
-  Msg.ctrl.ide = MESSAGE_PROTOCOL;  // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
-  Msg.id.ext   = MESSAGE_ID;        // Set message ID
-  Msg.dlc      = MESSAGE_LENGTH;    // Data length: 8 bytes
-  Msg.ctrl.rtr = MESSAGE_RTR;       // Set rtr bit
-
-  int tickEvent = t.every(15, displayValue, 0);
-
-  displayNumber(Depth);
+    // CAN
+    canInit(250000u);            // Initialise CAN port 250kbps. must be before Serial.begin
+    Serial.begin(1000000u);       // start serial port 1Mbps
+    Msg.pt_data = &Buffer[0];    // reference message data to buffer
+    
+    // Initialise CAN packet.
+    // All of these will be overwritten by a received packet
+    Msg.ctrl.ide = MESSAGE_PROTOCOL;  // Set CAN protocol (0: CAN 2.0A, 1: CAN 2.0B)
+    Msg.id.ext   = MESSAGE_ID;        // Set message ID
+    Msg.dlc      = MESSAGE_LENGTH;    // Data length: 8 bytes
+    Msg.ctrl.rtr = MESSAGE_RTR;       // Set rtr bit
+  
+    int tickEvent = t.every(15, displayValue, 0);
+  
+    displayNumber(Depth);
 }
 
 void loop() 
 {
-    
-  t.update();
+    t.update();
 
-  processCan();
-  
+    processCan();
 }
+
 
 void displayValue()
 {
@@ -85,49 +84,55 @@ void processCan()
   // Wait for the command to be accepted by the controller
   while (can_cmd(&Msg) != CAN_CMD_ACCEPTED)
   {
-    t.update();
+      t.update();
   }
   // Wait for command to finish executing
   while (can_get_status(&Msg) == CAN_STATUS_NOT_COMPLETED)
   {
-    t.update();
+      t.update();
   }
-
-  Depth = Msg.pt_data[3];
 
   getNMEA2Kdata(&Msg);
-  serialPrintData(&Msg);
+  //serialPrintData(&Msg);
 
-  
 }
 
-int getNMEA2Kdata(st_cmd_t *msg)
+void getNMEA2Kdata(st_cmd_t *msg)
 {
-  char textBuffer[50] = {0};
-  Serial.print("NMEA2k\r\n");
-  
-  sprintf(textBuffer, "id ext %08x", msg->id.ext);
-  
-  if (msg->id.ext == 0x00000b23)  // depth 
+  if ( (uint16_t)msg->id.ext == 0xb23)  // depth 
   {
-    //msg->pt_data[i]
-    Serial.print("depth\r\n");
+    Serial.print("NMEA2k: depth\r\n");    
+    uint32_t Du32 = (uint32_t)(((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) | ((uint32_t)Msg.pt_data[2] << 8) | Msg.pt_data[1]);
+    if (Du32 == 0xFFFFFFFF)
+    {
+        Depth = 0;
+    }
+    else
+    {
+        double Dd = (double)Du32 * 0.001;
+        Depth = (uint16_t)Dd;
+        if(Depth > 999)
+        {
+            Depth = 999;
+        }
+    }
   }
-  else if (msg->id.ext == 0x00000323) // speed
+  else if ( (uint16_t)msg->id.ext == 0x323) // speed
   {
-    Serial.print("speed\r\n");    
+    Serial.print("NMEA2k: speed\r\n");    
   }
-  else if (msg->id.ext == 0x00000723) // water temp
+  else if ( (uint16_t)msg->id.ext == 0x723) // water temp
   {
-    Serial.print("water temp\r\n");
+    Serial.print("NMEA2k: water temp\r\n");
   }
-
+  else if ( (uint16_t)msg->id.ext == 0x1223 ) // heading 0x1223 = 4643
+  {
+    Serial.print("NMEA2k: heading\r\n");
+  }
+  else 
+    Serial.print("NMEA2k: unmanaged PGN\r\n");
   
-  else if (textBuffer[3] == '1' && textBuffer[2] == '2') // heading 0x1223 = 4643
-  {
-    Serial.print("heading\r\n");
-  }
-  
+  // ... others NMEA2K message
 }
 
 void serialPrintData(st_cmd_t *msg) {
