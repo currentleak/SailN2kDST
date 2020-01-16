@@ -15,6 +15,7 @@
 #define DIGIT_OFF  LOW
 
 // Function prototypes
+void processButton();
 void processCan();
 void serialPrintData(st_cmd_t *msg);
 void displayNumber(int toDisplay);
@@ -29,7 +30,11 @@ st_cmd_t Msg;
 uint8_t Buffer[8] = {};
 
 Timer t;
-uint16_t Depth = 0;  // /10 m
+uint16_t Depth = 0; 
+uint16_t Speed = 0;
+uint16_t Temperature = 0;  
+uint8_t paramSel = 0;
+
 bool lossEcho = false;
 bool dot = false;
 
@@ -46,6 +51,9 @@ int segF = 15; //Display pin 11
 int segG = 16; //Display pin 15
 int dp = 17; //Display pin 7
 
+// pin mapping button
+int buttonPin = 9;
+
 void setup() 
 {    
     // 7seg LEDs
@@ -53,7 +61,8 @@ void setup()
     pinMode(segE, OUTPUT);  pinMode(segF, OUTPUT);  pinMode(segG, OUTPUT);  
     pinMode(digit1, OUTPUT);  pinMode(digit2, OUTPUT);  pinMode(digit3, OUTPUT);
     pinMode(dp, OUTPUT);
-  
+    pinMode(buttonPin, INPUT_PULLUP);
+    
     // CAN
     canInit(250000u);            // Initialise CAN port 250kbps. must be before Serial.begin
     Serial.begin(1000000u);       // start serial port 1Mbps
@@ -65,6 +74,8 @@ void setup()
     Msg.id.ext   = MESSAGE_ID;        // Set message ID
     Msg.dlc      = MESSAGE_LENGTH;    // Data length: 8 bytes
     Msg.ctrl.rtr = MESSAGE_RTR;       // Set rtr bit
+
+    //attachInterrupt(digitalPinToInterrupt(buttonPin), processButton, FALLING);
   
     int tickEvent = t.every(15, displayValue, 0);
   
@@ -72,8 +83,7 @@ void setup()
     delay(10);
     for(int i=0; i<10; i++)
     {
-      if(dot == false) dot = true;
-      else dot = false;
+      dot = !dot;
       for(int j=0; j<10; j++)
       {
         delay(10);
@@ -87,7 +97,10 @@ void setup()
 void loop() 
 {
     t.update();
-
+    if(digitalRead(buttonPin) == LOW)
+    {
+        processButton();
+    }
     processCan(); 
 }
 
@@ -95,12 +108,23 @@ void loop()
 void displayValue()
 {
   //displayNumber(millis() / 1000);
-  displayNumber(Depth);
+  if(paramSel == 0)
+  {
+    displayNumber(Depth);
+  }
+  else if(paramSel == 1)
+  {
+    displayNumber(Speed);
+  }
+  else if(paramSel == 2)
+  {
+    displayNumber(Temperature);
+  }
+  else displayNumber(0);
 }
 
 void processCan()
 {
-  
   clearBuffer(&Buffer[0]);  // Clear the message buffer
   Msg.cmd = CMD_RX_DATA;  // Send command to the CAN port controller
 
@@ -122,46 +146,52 @@ void processCan()
 
 void getNMEA2Kdata(st_cmd_t *msg)
 {
-  if ( (uint16_t)msg->id.ext == 0xb23)  // depth 
+  if ( (uint16_t)msg->id.ext == 0x0B23)  // depth 
   {
-    Serial.print("NMEA2k: depth 0xb23\r\n");    
-    uint32_t Du32 = (uint32_t)( ((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) |
-                                ((uint32_t)Msg.pt_data[2] << 8) | (uint32_t)Msg.pt_data[1] );
-    if (Du32 == 0xFFFFFFFF) // DST800 no echo
-    {
-        dot = false;
-        lossEcho = true;
-        Depth = 999;
-    }
-    else
-    {
-        double Dd = (double)Du32 * 0.01; // in dm, with a dot before the last digit display is in meter
-        Dd = round(Dd);
-        Depth = (uint16_t)Dd;
-        if(Depth >= 1000) // DST800 is 100m=1000dm max
-        {
+      Serial.print("NMEA2k Depth: 0x0B23 # ");    
+      uint32_t Du32 = (uint32_t)( ((uint32_t)Msg.pt_data[4] << 24) | ((uint32_t)Msg.pt_data[3] << 16) |
+                                  ((uint32_t)Msg.pt_data[2] << 8) | (uint32_t)Msg.pt_data[1] );
+      Serial.println(Du32);
+      if (Du32 == 0xFFFFFFFF) // DST800 no echo
+      {
           dot = false;
+          lossEcho = true;
           Depth = 888;
-        }
-        else
-        {
-          dot = true;
-        }
-        lossEcho = false;
-
-    }
+      }
+      else
+      {
+          double Dd = (double)Du32 * 0.1; // depth in decimeter, with a dot before the last digit display is in meter
+          Dd = round(Dd);
+          Depth = (uint16_t)Dd;
+          if(Depth >= 1000) // DST800 is 100m=1000dm max
+          {
+            dot = false;
+            Depth = 999;
+          }
+          else
+          {
+            dot = true;
+          }
+          lossEcho = false;
+      }
   }
-  else if ( (uint16_t)msg->id.ext == 0x323) // speed
+  else if ( (uint16_t)msg->id.ext == 0x0323) // speed
   {
-    Serial.print("NMEA2k: speed 0x323\r\n");    
+      Serial.print("NMEA2k Speed: 0x323 # ");
+      uint16_t Su16 = (uint16_t)( ((uint16_t)Msg.pt_data[2] << 8) | Msg.pt_data[1] );
+      Serial.println(Su16);
+      double Sd = (double)Su16 *0.01; // speed in m/s
+      Sd = Sd *10; // speed in decimeter/s
+      Speed = (uint16_t)Sd;
   }
-  else if ( (uint16_t)msg->id.ext == 0x723) // water temp
+  else if ( (uint16_t)msg->id.ext == 0x0723) // water temp
   {
-    Serial.print("NMEA2k: water temp 0x723\r\n");
-  }
-  else if ( (uint16_t)msg->id.ext == 0x1223 ) // heading 0x1223 = 4643
-  {
-    Serial.print("NMEA2k: heading 0x1223\r\n");
+      Serial.print("NMEA2k Water Temp: 0x723 # ");
+      uint16_t Tu16 = (uint16_t)( ((uint16_t)Msg.pt_data[3] << 8) | Msg.pt_data[2] );
+      Serial.println(Tu16); // in degK
+      double Td = (double)Tu16 * 0.01 - 273.15; // temp in degC
+      Td = Td *10; // temperature in deciCelcius
+      Temperature = (uint16_t)Td;
   }
   else 
   {
@@ -169,9 +199,24 @@ void getNMEA2Kdata(st_cmd_t *msg)
     sprintf(textBuffer, "NMEA2k: unmanaged PGN IDext=%d\r\n", msg->id.ext);
     Serial.print(textBuffer);
   }
-
   // ... others NMEA2K message
 }
+
+
+void processButton()
+{
+  delay(250);
+  if(digitalRead(buttonPin) == LOW)
+  {
+    //Serial.println("Button pressed");
+    paramSel = paramSel +1;
+    if(paramSel == 3)
+    {
+      paramSel =0;
+    }
+  }
+}
+
 
 void serialPrintData(st_cmd_t *msg) {
   char textBuffer[50] = {0};
